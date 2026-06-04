@@ -8,7 +8,7 @@ L3RS-1 Layer-3 Regulated Asset Standard — Rust Reference Implementation
 
 ```toml
 [dependencies]
-l3rs1-sdk = "1.0.0"
+l3rs1-sdk = "1.0.1"
 ```
 
 ## Usage

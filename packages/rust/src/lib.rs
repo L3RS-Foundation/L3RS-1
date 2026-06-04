@@ -10,7 +10,7 @@ pub use crypto::*;
 pub use modules::*;
 pub use types::*;
 
-pub const SDK_VERSION: &str = "1.0.0";
+pub const SDK_VERSION: &str = "1.0.1";
 pub const STANDARD_VERSION: &str = "L3RS-1.0.0";
 pub const CONFORMANCE_CLASS: &str = "CROSSCHAIN";
 

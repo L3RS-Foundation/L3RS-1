@@ -12,7 +12,7 @@ The L3RS-1 SDK is a multi-language reference implementation of the [L3RS-1 speci
 | Python | `pip install l3rs1-sdk` | [API Reference](python/) |
 | Go | `go get github.com/L3RS-Foundation/L3RS-1/packages/go` | [API Reference](go/) |
 | Rust | `cargo add l3rs1-sdk` | [API Reference](rust/) |
-| Java | `foundation.l3rs1:l3rs1-sdk:1.0.0` | [API Reference](java/) |
+| Java | `foundation.l3rs1:l3rs1-sdk:1.0.1` | [API Reference](java/) |
 | Solidity | `npm install @l3rs/contracts` | [API Reference](solidity/) |
 
 ## Conformance Class
