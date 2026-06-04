@@ -1,6 +1,6 @@
 [package]
 name = "l3rs1-sdk"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "L3RS-1 Layer-3 Regulated Asset Standard — Reference Implementation"
 license = "Apache-2.0"
