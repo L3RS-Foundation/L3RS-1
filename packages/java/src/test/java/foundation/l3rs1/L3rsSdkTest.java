@@ -149,4 +149,73 @@ class L3rsSdkTest {
         var history = new HashSet<>(Set.of(txId));
         assertFalse(L3rsModules.isReplay(ev2, history));
     }
+
+    // ── §4 Compliance engine (fail-closed, §10.15 attestations) ───────────────
+
+    private static ComplianceModule sanctionsModule() {
+        return new ComplianceModule(List.of(new ComplianceRule(
+            "r1", RuleType.SANCTIONS_SCREENING, "*", "TRANSFER", 1, EnforcementAction.REJECT,
+            Map.of("sourceHash", "OFAC-2026-06-04", "minVersion", 7))));
+    }
+
+    private static EvalContext ctx(OracleAttestation att) {
+        Map<RuleType, OracleAttestation> m = new HashMap<>();
+        if (att != null) m.put(RuleType.SANCTIONS_SCREENING, att);
+        return new EvalContext(100L, NOW, "GE",
+            new PartyAttributes(IdentityStatus.VALID, "GE", "", 0L),
+            new PartyAttributes(IdentityStatus.VALID, "GE", "", 0L), m);
+    }
+
+    @Test @DisplayName("§4 fails closed without attestation")
+    void complianceFailsClosedWithoutAttestation() {
+        assertFalse(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE, ctx(null)).allowed());
+    }
+
+    @Test @DisplayName("§10.15 blocks on source-hash mismatch")
+    void complianceBlocksWrongHash() {
+        assertFalse(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE,
+            ctx(new OracleAttestation(true, 9, "WRONG", NOW + 3600))).allowed());
+    }
+
+    @Test @DisplayName("§10.15 blocks on stale version")
+    void complianceBlocksStaleVersion() {
+        assertFalse(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE,
+            ctx(new OracleAttestation(true, 3, "OFAC-2026-06-04", NOW + 3600))).allowed());
+    }
+
+    @Test @DisplayName("§10.15 blocks expired attestation")
+    void complianceBlocksExpired() {
+        assertFalse(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE,
+            ctx(new OracleAttestation(true, 9, "OFAC-2026-06-04", NOW - 1))).allowed());
+    }
+
+    @Test @DisplayName("§4 blocks on sanctions hit")
+    void complianceBlocksSanctionsHit() {
+        assertFalse(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE,
+            ctx(new OracleAttestation(false, 9, "OFAC-2026-06-04", NOW + 3600))).allowed());
+    }
+
+    @Test @DisplayName("§4 allows fully valid attested transfer")
+    void complianceAllowsValid() {
+        assertTrue(L3rsModules.evaluateCompliance(sanctionsModule(), AssetState.ACTIVE,
+            ctx(new OracleAttestation(true, 9, "OFAC-2026-06-04", NOW + 3600))).allowed());
+    }
+
+    @Test @DisplayName("§4.4 geographic restriction blocks")
+    void complianceGeographicBlocks() {
+        ComplianceModule mod = new ComplianceModule(List.of(new ComplianceRule(
+            "g", RuleType.GEOGRAPHIC_RESTRICTION, "*", "TRANSFER", 1, EnforcementAction.REJECT,
+            Map.of("blockedJurisdictions", List.of("GE")))));
+        assertFalse(L3rsModules.evaluateCompliance(mod, AssetState.ACTIVE, ctx(null)).allowed());
+    }
+
+    @Test @DisplayName("§4.4 transfer eligibility blocks on invalid identity")
+    void complianceTransferEligibilityBlocksBadIdentity() {
+        EvalContext c = new EvalContext(100L, NOW, "GE",
+            new PartyAttributes(IdentityStatus.VALID, "GE", "", 0L),
+            new PartyAttributes(IdentityStatus.EXPIRED, "GE", "", 0L), new HashMap<>());
+        ComplianceModule mod = new ComplianceModule(List.of(new ComplianceRule(
+            "t", RuleType.TRANSFER_ELIGIBILITY, "*", "TRANSFER", 1, EnforcementAction.REJECT, Map.of())));
+        assertFalse(L3rsModules.evaluateCompliance(mod, AssetState.ACTIVE, c).allowed());
+    }
 }

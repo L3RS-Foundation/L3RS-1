@@ -150,3 +150,74 @@ def test_identity_revoked():
 def test_revoked_beats_expired():
     r = IdentityRecord("a"*64, "va", "US", 1000000000, True)
     assert identity_status(r, NOW) == IdentityStatus.REVOKED
+
+
+# ── §4 Compliance engine (fail-closed, §10.15 attestations) ──────────────────
+from types import SimpleNamespace
+from l3rs1.types import ComplianceRule, ComplianceModule
+from l3rs1.modules import (
+    evaluate_compliance, ComplianceContext, PartyAttributes, OracleAttestation,
+)
+
+def _active_asset(jurisdiction="GE"):
+    return SimpleNamespace(state=AssetState.ACTIVE, jurisdiction=jurisdiction)
+
+def _sanctions_module():
+    return ComplianceModule(rules=(ComplianceRule(
+        rule_id="r1", rule_type=RuleType.SANCTIONS_SCREENING, scope="*",
+        trigger="TRANSFER", priority=1, action=EnforcementAction.REJECT,
+        params={"sourceHash": "OFAC-2026-06-04", "minVersion": 7},
+    ),))
+
+def _ctx(attestation=None):
+    atts = {RuleType.SANCTIONS_SCREENING: attestation} if attestation else {}
+    return ComplianceContext(
+        asset=_active_asset(), sender="alice", receiver="bob",
+        amount=100, timestamp=NOW,
+        sender_attrs=PartyAttributes(identity_status=IdentityStatus.VALID, jurisdiction="GE"),
+        receiver_attrs=PartyAttributes(identity_status=IdentityStatus.VALID, jurisdiction="GE"),
+        attestations=atts,
+    )
+
+def test_compliance_fails_closed_without_attestation():
+    assert evaluate_compliance(_sanctions_module(), _ctx()).allowed is False
+
+def test_compliance_blocks_wrong_hash():
+    a = OracleAttestation(True, 9, "WRONG", NOW + 3600)
+    assert evaluate_compliance(_sanctions_module(), _ctx(a)).allowed is False
+
+def test_compliance_blocks_stale_version():
+    a = OracleAttestation(True, 3, "OFAC-2026-06-04", NOW + 3600)
+    assert evaluate_compliance(_sanctions_module(), _ctx(a)).allowed is False
+
+def test_compliance_blocks_expired():
+    a = OracleAttestation(True, 9, "OFAC-2026-06-04", NOW - 1)
+    assert evaluate_compliance(_sanctions_module(), _ctx(a)).allowed is False
+
+def test_compliance_blocks_sanctions_hit():
+    a = OracleAttestation(False, 9, "OFAC-2026-06-04", NOW + 3600)
+    assert evaluate_compliance(_sanctions_module(), _ctx(a)).allowed is False
+
+def test_compliance_allows_valid():
+    a = OracleAttestation(True, 9, "OFAC-2026-06-04", NOW + 3600)
+    assert evaluate_compliance(_sanctions_module(), _ctx(a)).allowed is True
+
+def test_compliance_geographic_blocks():
+    mod = ComplianceModule(rules=(ComplianceRule(
+        rule_id="g", rule_type=RuleType.GEOGRAPHIC_RESTRICTION, scope="*",
+        trigger="TRANSFER", priority=1, action=EnforcementAction.REJECT,
+        params={"blockedJurisdictions": ["GE"]},
+    ),))
+    assert evaluate_compliance(mod, _ctx()).allowed is False
+
+def test_compliance_transfer_eligibility_blocks_bad_identity():
+    ctx = ComplianceContext(
+        asset=_active_asset(), sender="alice", receiver="bob", amount=100, timestamp=NOW,
+        sender_attrs=PartyAttributes(identity_status=IdentityStatus.VALID, jurisdiction="GE"),
+        receiver_attrs=PartyAttributes(identity_status=IdentityStatus.EXPIRED, jurisdiction="GE"),
+    )
+    mod = ComplianceModule(rules=(ComplianceRule(
+        rule_id="t", rule_type=RuleType.TRANSFER_ELIGIBILITY, scope="*",
+        trigger="TRANSFER", priority=1, action=EnforcementAction.REJECT, params={},
+    ),))
+    assert evaluate_compliance(mod, ctx).allowed is False
