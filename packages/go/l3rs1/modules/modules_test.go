@@ -126,3 +126,58 @@ func TestReplayProtection(t *testing.T) {
 	notReplay, _ := modules.IsReplay(ev2, history)
 	if notReplay { t.Error("different nonce should not be replay") }
 }
+
+func TestComplianceFailsClosed(t *testing.T) {
+	now := int64(1_740_355_200)
+	mod := &types.ComplianceModule{Rules: []types.ComplianceRule{{
+		RuleID: "r1", RuleType: types.RuleTypeSanctionsScreening, Scope: "*",
+		Priority: 1, Action: types.EnforcementReject,
+		Params:   map[string]any{"sourceHash": "OFAC-2026-06-04", "minVersion": int64(7)},
+	}}}
+	base := modules.EvalContext{
+		Amount: 100, Timestamp: now, Jurisdiction: "GE",
+		Sender:   modules.PartyAttributes{IdentityStatus: types.IdentityStatusValid, Jurisdiction: "GE"},
+		Receiver: modules.PartyAttributes{IdentityStatus: types.IdentityStatusValid, Jurisdiction: "GE"},
+	}
+	att := func(a modules.OracleAttestation) modules.EvalContext {
+		c := base
+		c.Attestations = map[types.RuleType]modules.OracleAttestation{types.RuleTypeSanctionsScreening: a}
+		return c
+	}
+	check := func(name string, c modules.EvalContext, wantAllow bool) {
+		got := modules.EvaluateCompliance(mod, types.AssetStateActive, c).Allowed
+		if got != wantAllow {
+			t.Errorf("%s: allowed=%v want %v", name, got, wantAllow)
+		}
+	}
+	check("no attestation (unknown oracle)", base, false)
+	check("wrong source hash", att(modules.OracleAttestation{Cleared: true, Version: 9, SourceHash: "WRONG", ValidUntil: now + 3600}), false)
+	check("stale version", att(modules.OracleAttestation{Cleared: true, Version: 3, SourceHash: "OFAC-2026-06-04", ValidUntil: now + 3600}), false)
+	check("expired attestation", att(modules.OracleAttestation{Cleared: true, Version: 9, SourceHash: "OFAC-2026-06-04", ValidUntil: now - 1}), false)
+	check("sanctions hit", att(modules.OracleAttestation{Cleared: false, Version: 9, SourceHash: "OFAC-2026-06-04", ValidUntil: now + 3600}), false)
+	check("valid+fresh+cleared", att(modules.OracleAttestation{Cleared: true, Version: 9, SourceHash: "OFAC-2026-06-04", ValidUntil: now + 3600}), true)
+}
+
+func TestComplianceNativeCategories(t *testing.T) {
+	now := int64(1_740_355_200)
+	ctx := modules.EvalContext{
+		Amount: 500, Timestamp: now, Jurisdiction: "GE",
+		Sender:   modules.PartyAttributes{IdentityStatus: types.IdentityStatusValid, Jurisdiction: "GE", InvestorClass: "ACCREDITED", AcquisitionTime: now - 100000},
+		Receiver: modules.PartyAttributes{IdentityStatus: types.IdentityStatusValid, Jurisdiction: "GE", InvestorClass: "ACCREDITED"},
+	}
+	geo := &types.ComplianceModule{Rules: []types.ComplianceRule{{
+		RuleID: "g", RuleType: types.RuleTypeGeographicRestriction, Scope: "*", Priority: 1,
+		Action: types.EnforcementReject, Params: map[string]any{"blockedJurisdictions": []string{"GE"}},
+	}}}
+	if modules.EvaluateCompliance(geo, types.AssetStateActive, ctx).Allowed {
+		t.Error("blocked jurisdiction must reject")
+	}
+	teCtx := ctx
+	teCtx.Receiver.IdentityStatus = types.IdentityStatusExpired
+	te := &types.ComplianceModule{Rules: []types.ComplianceRule{{
+		RuleID: "t", RuleType: types.RuleTypeTransferEligibility, Scope: "*", Priority: 1, Action: types.EnforcementReject,
+	}}}
+	if modules.EvaluateCompliance(te, types.AssetStateActive, teCtx).Allowed {
+		t.Error("expired receiver identity must block transfer eligibility")
+	}
+}
