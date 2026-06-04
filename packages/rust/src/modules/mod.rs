@@ -248,3 +248,260 @@ mod tests {
         assert!(!is_replay(&ev2, &history).unwrap());
     }
 }
+
+// ── §4 Compliance Engine ──────────────────────────────────────────────────────
+
+/// Resolved, attested attributes of a transfer party (§3.6, §4.6 inputs).
+#[derive(Debug, Clone)]
+pub struct PartyAttributes {
+    pub identity_status: IdentityStatus,
+    pub jurisdiction: String,
+    pub investor_class: String,
+    pub acquisition_time: i64, // unix seconds; basis for holding period
+}
+
+impl Default for PartyAttributes {
+    fn default() -> Self {
+        Self {
+            identity_status: IdentityStatus::Unknown,
+            jurisdiction: String::new(),
+            investor_class: String::new(),
+            acquisition_time: 0,
+        }
+    }
+}
+
+/// §10.15 contract for external data sources (sanctions/AML/reserve). MUST be
+/// hash-anchored, versioned and time-bounded. Unknown, stale, or mismatched
+/// attestations evaluate as BLOCKING.
+#[derive(Debug, Clone)]
+pub struct OracleAttestation {
+    pub cleared: bool,
+    pub version: u64,
+    pub source_hash: String,
+    pub valid_until: i64, // unix seconds; stale at/after this time
+}
+
+/// Everything the engine needs to evaluate every §4.4 category deterministically.
+#[derive(Debug, Clone, Default)]
+pub struct EvalContext {
+    pub amount: u64,
+    pub timestamp: i64,
+    pub jurisdiction: String,
+    pub sender: PartyAttributes,
+    pub receiver: PartyAttributes,
+    pub attestations: std::collections::HashMap<RuleType, OracleAttestation>,
+}
+
+/// §4.3 — `C: E → {0,1}` as the conjunction of all in-scope rule predicates,
+/// evaluated in ascending priority order, first blocking rule terminating
+/// (§4.5). Enforces Invariant I₂ (§10.6): any FALSE blocks.
+pub fn evaluate_compliance(
+    module: &ComplianceModule,
+    state: AssetState,
+    ctx: &EvalContext,
+) -> ComplianceDecision {
+    if !matches!(state, AssetState::Active) {
+        return ComplianceDecision { allowed: false, blocked_by: None };
+    }
+    let mut rules = module.rules.clone();
+    rules.sort_by_key(|r| r.priority);
+    for rule in &rules {
+        if rule.scope != "*" && rule.scope != ctx.jurisdiction {
+            continue;
+        }
+        if !eval_rule(rule, ctx) && rule.action.is_blocking() {
+            return ComplianceDecision { allowed: false, blocked_by: Some(rule.clone()) };
+        }
+    }
+    ComplianceDecision { allowed: true, blocked_by: None }
+}
+
+/// Rule predicate rᵢ: E → {TRUE, FALSE} (§4.6). Every branch fails closed:
+/// missing inputs and unverifiable oracle state all evaluate to FALSE (block).
+/// The match is exhaustive over all nine §4.4 categories — no silent fallthrough.
+fn eval_rule(rule: &ComplianceRule, ctx: &EvalContext) -> bool {
+    match rule.rule_type {
+        RuleType::TransferEligibility => {
+            ctx.sender.identity_status == IdentityStatus::Valid
+                && ctx.receiver.identity_status == IdentityStatus::Valid
+        }
+        RuleType::InvestorClassification => {
+            let allowed = list_param(&rule.params, "allowedClasses");
+            if allowed.is_empty() || ctx.receiver.investor_class.is_empty() {
+                return false;
+            }
+            allowed.iter().any(|c| c == &ctx.receiver.investor_class)
+        }
+        RuleType::HoldingPeriod => match num_param(&rule.params, "holdingPeriodSec") {
+            Some(period) if ctx.sender.acquisition_time != 0 => {
+                (ctx.timestamp - ctx.sender.acquisition_time) >= period
+            }
+            _ => false,
+        },
+        RuleType::GeographicRestriction => {
+            if ctx.sender.jurisdiction.is_empty() || ctx.receiver.jurisdiction.is_empty() {
+                return false;
+            }
+            let blocked = list_param(&rule.params, "blockedJurisdictions");
+            !blocked.contains(&ctx.sender.jurisdiction)
+                && !blocked.contains(&ctx.receiver.jurisdiction)
+        }
+        RuleType::TransactionThreshold => match num_param(&rule.params, "thresholdAmount") {
+            Some(t) => (ctx.amount as i64) <= t,
+            None => false,
+        },
+        RuleType::MarketRestriction => {
+            match (
+                num_param(&rule.params, "windowOpen"),
+                num_param(&rule.params, "windowClose"),
+            ) {
+                (Some(open), Some(close)) => ctx.timestamp >= open && ctx.timestamp < close,
+                _ => attestation_clears(rule, ctx),
+            }
+        }
+        RuleType::SanctionsScreening
+        | RuleType::AmlTrigger
+        | RuleType::RedemptionEligibility => attestation_clears(rule, ctx),
+    }
+}
+
+/// §10.15 oracle contract: present, anchored to the operator-pinned source hash,
+/// at/above the pinned minimum version, and within its freshness window.
+fn attestation_clears(rule: &ComplianceRule, ctx: &EvalContext) -> bool {
+    let att = match ctx.attestations.get(&rule.rule_type) {
+        Some(a) => a,
+        None => return false, // unknown oracle state → block
+    };
+    let pinned = str_param(&rule.params, "sourceHash");
+    if pinned.is_empty() || att.source_hash != pinned {
+        return false;
+    }
+    if let Some(min_v) = num_param(&rule.params, "minVersion") {
+        if (att.version as i64) < min_v {
+            return false;
+        }
+    }
+    if ctx.timestamp >= att.valid_until {
+        return false;
+    }
+    att.cleared
+}
+
+fn num_param(params: &std::collections::HashMap<String, serde_json::Value>, key: &str) -> Option<i64> {
+    params
+        .get(key)
+        .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+}
+
+fn str_param(params: &std::collections::HashMap<String, serde_json::Value>, key: &str) -> String {
+    params.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+}
+
+fn list_param(params: &std::collections::HashMap<String, serde_json::Value>, key: &str) -> Vec<String> {
+    params
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|e| e.as_str().map(String::from)).collect())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod compliance_tests {
+    use super::*;
+    use crate::types::*;
+
+    fn params(v: serde_json::Value) -> std::collections::HashMap<String, serde_json::Value> {
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn sanctions_module() -> ComplianceModule {
+        ComplianceModule {
+            rules: vec![ComplianceRule {
+                rule_id: "r1".into(),
+                rule_type: RuleType::SanctionsScreening,
+                scope: "*".into(),
+                trigger: "TRANSFER".into(),
+                priority: 1,
+                action: EnforcementAction::Reject,
+                params: params(serde_json::json!({"sourceHash":"OFAC-2026-06-04","minVersion":7})),
+            }],
+        }
+    }
+
+    fn ctx(att: Option<OracleAttestation>) -> EvalContext {
+        let mut attestations = std::collections::HashMap::new();
+        if let Some(a) = att {
+            attestations.insert(RuleType::SanctionsScreening, a);
+        }
+        EvalContext {
+            amount: 100,
+            timestamp: 1_740_355_200,
+            jurisdiction: "GE".into(),
+            sender: PartyAttributes { identity_status: IdentityStatus::Valid, jurisdiction: "GE".into(), ..Default::default() },
+            receiver: PartyAttributes { identity_status: IdentityStatus::Valid, jurisdiction: "GE".into(), ..Default::default() },
+            attestations,
+        }
+    }
+
+    #[test]
+    fn fails_closed_without_attestation() {
+        assert!(!evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(None)).allowed);
+    }
+
+    #[test]
+    fn blocks_wrong_hash() {
+        let a = OracleAttestation { cleared: true, version: 9, source_hash: "WRONG".into(), valid_until: 1_740_358_800 };
+        assert!(!evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(Some(a))).allowed);
+    }
+
+    #[test]
+    fn blocks_stale_version() {
+        let a = OracleAttestation { cleared: true, version: 3, source_hash: "OFAC-2026-06-04".into(), valid_until: 1_740_358_800 };
+        assert!(!evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(Some(a))).allowed);
+    }
+
+    #[test]
+    fn blocks_expired() {
+        let a = OracleAttestation { cleared: true, version: 9, source_hash: "OFAC-2026-06-04".into(), valid_until: 1_740_355_199 };
+        assert!(!evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(Some(a))).allowed);
+    }
+
+    #[test]
+    fn blocks_sanctions_hit() {
+        let a = OracleAttestation { cleared: false, version: 9, source_hash: "OFAC-2026-06-04".into(), valid_until: 1_740_358_800 };
+        assert!(!evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(Some(a))).allowed);
+    }
+
+    #[test]
+    fn allows_valid() {
+        let a = OracleAttestation { cleared: true, version: 9, source_hash: "OFAC-2026-06-04".into(), valid_until: 1_740_358_800 };
+        assert!(evaluate_compliance(&sanctions_module(), AssetState::Active, &ctx(Some(a))).allowed);
+    }
+
+    #[test]
+    fn geographic_blocks() {
+        let module = ComplianceModule {
+            rules: vec![ComplianceRule {
+                rule_id: "g".into(), rule_type: RuleType::GeographicRestriction, scope: "*".into(),
+                trigger: "TRANSFER".into(), priority: 1, action: EnforcementAction::Reject,
+                params: params(serde_json::json!({"blockedJurisdictions":["GE"]})),
+            }],
+        };
+        assert!(!evaluate_compliance(&module, AssetState::Active, &ctx(None)).allowed);
+    }
+
+    #[test]
+    fn transfer_eligibility_blocks_bad_identity() {
+        let mut c = ctx(None);
+        c.receiver.identity_status = IdentityStatus::Expired;
+        let module = ComplianceModule {
+            rules: vec![ComplianceRule {
+                rule_id: "t".into(), rule_type: RuleType::TransferEligibility, scope: "*".into(),
+                trigger: "TRANSFER".into(), priority: 1, action: EnforcementAction::Reject,
+                params: std::collections::HashMap::new(),
+            }],
+        };
+        assert!(!evaluate_compliance(&module, AssetState::Active, &c).allowed);
+    }
+}
