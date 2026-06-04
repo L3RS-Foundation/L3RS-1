@@ -22,10 +22,12 @@ from l3rs1.types import (
     RuleType, EnforcementAction, GovernanceAction, BackingType,
     AttestationFrequency, ReserveStatus, InsolvencyPriority,
     FeeModule, FeeAllocation, IdentityRecord, TransferEvent,
+    ComplianceRule, ComplianceModule,
 )
 from l3rs1.modules import (
     apply_state_transition, validate_fee_module,
     is_replay, identity_status,
+    evaluate_compliance, ComplianceContext, PartyAttributes, OracleAttestation,
 )
 
 vectors_path = Path(__file__).parent / "canonical.json"
@@ -176,6 +178,37 @@ check_true("§13.11 deterministic",
 # ── §10 Invariants present ───────────────────────────────────────────────────
 for key in [f"I{i}" for i in range(1, 12)]:
     check_true(f"§10 Invariant {key} defined", key in TV["vectors"]["invariants"])
+
+# ── §4 Compliance evaluation (cross-language corpus) ──────────────────
+from types import SimpleNamespace
+_cv_path = Path(__file__).parent / "compliance_vectors.json"
+with open(_cv_path) as _f:
+    CV = json.load(_f)
+
+def _pa(p):
+    return PartyAttributes(IdentityStatus(p["identityStatus"]), p["jurisdiction"],
+                           p["investorClass"], p["acquisitionTime"])
+
+def _att(d):
+    return {RuleType(k): OracleAttestation(v["cleared"], v["version"], v["sourceHash"], v["validUntil"])
+            for k, v in d.items()}
+
+def _rule(r):
+    return ComplianceRule(r["ruleId"], RuleType(r["ruleType"]), r["scope"], r["trigger"],
+                          r["priority"], EnforcementAction(r["action"]), r.get("params", {}))
+
+for tc in CV["cases"]:
+    mod = ComplianceModule(tuple(_rule(r) for r in tc["module"]["rules"]))
+    ctx = ComplianceContext(
+        asset=SimpleNamespace(state=AssetState(tc["state"]), jurisdiction=tc["jurisdiction"]),
+        sender=tc["sender"], receiver=tc["receiver"], amount=tc["amount"], timestamp=tc["timestamp"],
+        sender_attrs=_pa(tc["sender"]), receiver_attrs=_pa(tc["receiver"]),
+        attestations=_att(tc["attestations"]))
+    dec = evaluate_compliance(mod, ctx)
+    got = dec.blocked_by.rule_id if dec.blocked_by else None
+    check_true(f"§4 vector {tc['name']} allowed",   dec.allowed == tc["expected"]["allowed"])
+    check_true(f"§4 vector {tc['name']} blockedBy", got == tc["expected"]["blockedBy"])
+
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 print()

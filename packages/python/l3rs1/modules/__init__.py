@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 from l3rs1.types import (
@@ -73,31 +73,48 @@ class SanctionsRegistry(Protocol):
 
 
 @dataclass(frozen=True)
+class PartyAttributes:
+    """Resolved, attested attributes of a transfer party (§3.6, §4.6 inputs)."""
+    identity_status:  IdentityStatus = IdentityStatus.UNKNOWN
+    jurisdiction:     str = ""
+    investor_class:   str = ""
+    acquisition_time: int = 0   # unix seconds; basis for holding period
+
+
+@dataclass(frozen=True)
+class OracleAttestation:
+    """§10.15 contract for external data sources (sanctions/AML/reserve).
+
+    MUST be hash-anchored, versioned and time-bounded. Unknown, stale, or
+    mismatched attestations evaluate as BLOCKING.
+    """
+    cleared:     bool
+    version:     int
+    source_hash: str
+    valid_until: int   # unix seconds; stale at/after this time
+
+
+@dataclass(frozen=True)
 class ComplianceContext:
-    asset:     Asset
-    sender:    str
-    receiver:  str
-    amount:    int
-    timestamp: int
-    sanctions: Optional[SanctionsRegistry] = None
+    asset:          Asset
+    sender:         str
+    receiver:       str
+    amount:         int
+    timestamp:      int
+    sanctions:      Optional[SanctionsRegistry] = None  # deprecated; superseded by attestations
+    sender_attrs:   PartyAttributes = field(default_factory=PartyAttributes)
+    receiver_attrs: PartyAttributes = field(default_factory=PartyAttributes)
+    attestations:   dict[RuleType, OracleAttestation] = field(default_factory=dict)
 
 
 _BLOCKING = {EnforcementAction.REJECT, EnforcementAction.FREEZE, EnforcementAction.RESTRICT}
-
-_STATE_RULE = ComplianceRule(
-    rule_id="SYSTEM_STATE_CHECK",
-    rule_type=RuleType.TRANSFER_ELIGIBILITY,
-    scope="*",
-    trigger="TRANSFER",
-    priority=0,
-    action=EnforcementAction.REJECT,
-)
 
 
 def evaluate_compliance(module: ComplianceModule, ctx: ComplianceContext) -> ComplianceDecision:
     """C: E → {0,1} — §4.3. O(n) per §14.3. Invariant I₂."""
     if ctx.asset.state != AssetState.ACTIVE:
-        return ComplianceDecision(False, _STATE_RULE, EnforcementAction.REJECT)
+        # State gate is a precondition, not a compliance rule → no blockedBy.
+        return ComplianceDecision(False)
     for rule in sorted(module.rules, key=lambda r: r.priority):
         if not _scope_applies(rule, ctx):
             continue
@@ -111,30 +128,88 @@ def _scope_applies(rule: ComplianceRule, ctx: ComplianceContext) -> bool:
 
 
 def _eval_rule(rule: ComplianceRule, ctx: ComplianceContext) -> bool:
-    if rule.rule_type == RuleType.HOLDING_PERIOD:
-        acq    = rule.params.get("acquisitionTime")
-        period = rule.params.get("holdingPeriodSec")
-        if acq is None or period is None:
-            return False
-        return (ctx.timestamp - int(acq)) >= int(period)  # type: ignore[arg-type]
+    """Rule predicate rᵢ: E → {TRUE, FALSE} (§4.6). Every branch fails closed:
+    missing inputs, unknown rule types, and unverifiable oracle state all → False."""
+    rt = rule.rule_type
 
-    if rule.rule_type == RuleType.TRANSACTION_THRESHOLD:
-        threshold = rule.params.get("thresholdAmount")
+    if rt == RuleType.TRANSFER_ELIGIBILITY:
+        return (ctx.sender_attrs.identity_status == IdentityStatus.VALID and
+                ctx.receiver_attrs.identity_status == IdentityStatus.VALID)
+
+    if rt == RuleType.INVESTOR_CLASSIFICATION:
+        allowed = _list_param(rule.params, "allowedClasses")
+        if not allowed or not ctx.receiver_attrs.investor_class:
+            return False
+        return ctx.receiver_attrs.investor_class in allowed
+
+    if rt == RuleType.HOLDING_PERIOD:
+        period = _num_param(rule.params, "holdingPeriodSec")
+        if period is None or ctx.sender_attrs.acquisition_time == 0:
+            return False
+        return (ctx.timestamp - ctx.sender_attrs.acquisition_time) >= period
+
+    if rt == RuleType.GEOGRAPHIC_RESTRICTION:
+        if not ctx.sender_attrs.jurisdiction or not ctx.receiver_attrs.jurisdiction:
+            return False
+        blocked = _list_param(rule.params, "blockedJurisdictions")
+        return (ctx.sender_attrs.jurisdiction not in blocked and
+                ctx.receiver_attrs.jurisdiction not in blocked)
+
+    if rt == RuleType.TRANSACTION_THRESHOLD:
+        threshold = _num_param(rule.params, "thresholdAmount")
         if threshold is None:
             return False
-        return ctx.amount <= int(threshold)  # type: ignore[arg-type]
+        return ctx.amount <= threshold
 
-    if rule.rule_type == RuleType.SANCTIONS_SCREENING:
-        if ctx.sanctions is None:
-            return False  # §4.8: cannot verify → block
-        return (not ctx.sanctions.is_listed(ctx.sender) and
-                not ctx.sanctions.is_listed(ctx.receiver))
+    if rt == RuleType.MARKET_RESTRICTION:
+        open_ = _num_param(rule.params, "windowOpen")
+        close = _num_param(rule.params, "windowClose")
+        if open_ is not None and close is not None:
+            return open_ <= ctx.timestamp < close
+        return _attestation_clears(rule, ctx)
 
-    # External rules: require pre-resolved bool
-    result = rule.params.get("externalResult")
-    if result is None:
-        return False  # §14.10: unknown → block
-    return bool(result)
+    if rt in (RuleType.SANCTIONS_SCREENING,
+              RuleType.AML_TRIGGER,
+              RuleType.REDEMPTION_ELIGIBILITY):
+        return _attestation_clears(rule, ctx)
+
+    return False  # unknown / future rule type → block
+
+
+def _attestation_clears(rule: ComplianceRule, ctx: ComplianceContext) -> bool:
+    """§10.15 oracle contract: present, anchored to the operator-pinned source
+    hash, at/above the pinned minimum version, and within its freshness window."""
+    att = ctx.attestations.get(rule.rule_type)
+    if att is None:
+        return False  # unknown oracle state → block
+    pinned = _str_param(rule.params, "sourceHash")
+    if not pinned or att.source_hash != pinned:
+        return False
+    min_v = _num_param(rule.params, "minVersion")
+    if min_v is not None and att.version < min_v:
+        return False
+    if ctx.timestamp >= att.valid_until:
+        return False
+    return att.cleared
+
+
+def _num_param(params: dict, key: str) -> Optional[int]:
+    v = params.get(key)
+    if isinstance(v, bool):       # bool is an int subclass — exclude it
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    return None
+
+
+def _str_param(params: dict, key: str) -> str:
+    v = params.get(key)
+    return v if isinstance(v, str) else ""
+
+
+def _list_param(params: dict, key: str) -> list[str]:
+    v = params.get(key)
+    return [e for e in v if isinstance(e, str)] if isinstance(v, list) else []
 
 
 # ══════════════════════════════════════════════════════════════════════════════

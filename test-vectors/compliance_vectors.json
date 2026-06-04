@@ -1,0 +1,1307 @@
+{
+  "version": "L3RS-1.0.0",
+  "description": "Cross-language compliance decision vectors (\u00a74). Every SDK engine MUST produce identical (allowed, blockedBy) for each case.",
+  "constants": {
+    "NOW": 1740355200,
+    "FUTURE": 1740358800,
+    "PAST": 1740355199
+  },
+  "cases": [
+    {
+      "name": "inactive_state_blocks",
+      "description": "Non-ACTIVE asset blocks regardless of rules",
+      "state": "RESTRICTED",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "r",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "empty_module_active_allows",
+      "description": "ACTIVE asset, no rules \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": []
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "out_of_scope_rule_ignored",
+      "description": "Rule scoped to another jurisdiction is skipped",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "r",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "US",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "transfer_eligibility_both_valid_allows",
+      "description": "Both parties VALID \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "te",
+            "ruleType": "TRANSFER_ELIGIBILITY",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "transfer_eligibility_receiver_expired_blocks",
+      "description": "Receiver EXPIRED \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "EXPIRED",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "te",
+            "ruleType": "TRANSFER_ELIGIBILITY",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "te"
+      }
+    },
+    {
+      "name": "transfer_eligibility_sender_unknown_blocks",
+      "description": "Sender UNKNOWN \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "UNKNOWN",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "te",
+            "ruleType": "TRANSFER_ELIGIBILITY",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "te"
+      }
+    },
+    {
+      "name": "investor_class_allowed_passes",
+      "description": "Receiver class in allowed set \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "ACCREDITED",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "ic",
+            "ruleType": "INVESTOR_CLASSIFICATION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "allowedClasses": [
+                "ACCREDITED",
+                "QIB"
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "investor_class_not_allowed_blocks",
+      "description": "Receiver class not allowed \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "RETAIL",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "ic",
+            "ruleType": "INVESTOR_CLASSIFICATION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "allowedClasses": [
+                "ACCREDITED"
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "ic"
+      }
+    },
+    {
+      "name": "investor_class_empty_param_blocks",
+      "description": "Missing allowedClasses \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "ACCREDITED",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "ic",
+            "ruleType": "INVESTOR_CLASSIFICATION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "ic"
+      }
+    },
+    {
+      "name": "holding_period_met_allows",
+      "description": "Held long enough \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 1740255200
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "hp",
+            "ruleType": "HOLDING_PERIOD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "holdingPeriodSec": 86400
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "holding_period_not_met_blocks",
+      "description": "Held too short \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 1740355100
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "hp",
+            "ruleType": "HOLDING_PERIOD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "holdingPeriodSec": 86400
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "hp"
+      }
+    },
+    {
+      "name": "holding_period_no_acq_blocks",
+      "description": "No acquisition time \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "hp",
+            "ruleType": "HOLDING_PERIOD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "holdingPeriodSec": 86400
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "hp"
+      }
+    },
+    {
+      "name": "geo_not_blocked_allows",
+      "description": "Neither party in blocked set \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "geo",
+            "ruleType": "GEOGRAPHIC_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "blockedJurisdictions": [
+                "KP",
+                "IR"
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "geo_blocked_blocks",
+      "description": "Party jurisdiction blocked \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "geo",
+            "ruleType": "GEOGRAPHIC_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "blockedJurisdictions": [
+                "GE"
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "geo"
+      }
+    },
+    {
+      "name": "geo_missing_jurisdiction_blocks",
+      "description": "Empty party jurisdiction \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "geo",
+            "ruleType": "GEOGRAPHIC_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "blockedJurisdictions": [
+                "KP"
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "geo"
+      }
+    },
+    {
+      "name": "threshold_under_allows",
+      "description": "Amount under threshold \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "tt",
+            "ruleType": "TRANSACTION_THRESHOLD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "thresholdAmount": 1000
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "threshold_over_blocks",
+      "description": "Amount over threshold \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 5000,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "tt",
+            "ruleType": "TRANSACTION_THRESHOLD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "thresholdAmount": 1000
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "tt"
+      }
+    },
+    {
+      "name": "threshold_missing_param_blocks",
+      "description": "Missing thresholdAmount \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "tt",
+            "ruleType": "TRANSACTION_THRESHOLD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {}
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "tt"
+      }
+    },
+    {
+      "name": "market_window_open_allows",
+      "description": "Within trading window \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "mr",
+            "ruleType": "MARKET_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "windowOpen": 1740355190,
+              "windowClose": 1740355210
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "market_window_closed_blocks",
+      "description": "Outside trading window \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "mr",
+            "ruleType": "MARKET_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "windowOpen": 1740355210,
+              "windowClose": 1740355220
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "mr"
+      }
+    },
+    {
+      "name": "market_no_window_no_attestation_blocks",
+      "description": "No window + no attestation \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "mr",
+            "ruleType": "MARKET_RESTRICTION",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "MIC-2026"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "mr"
+      }
+    },
+    {
+      "name": "sanctions_valid_attestation_allows",
+      "description": "Valid attestation, cleared \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "SANCTIONS_SCREENING": {
+          "cleared": true,
+          "version": 9,
+          "sourceHash": "OFAC-2026-06-04",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "sanctions_no_attestation_blocks",
+      "description": "No attestation \u2192 fail closed",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "sx"
+      }
+    },
+    {
+      "name": "sanctions_wrong_hash_blocks",
+      "description": "Source-hash mismatch \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "SANCTIONS_SCREENING": {
+          "cleared": true,
+          "version": 9,
+          "sourceHash": "WRONG",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "sx"
+      }
+    },
+    {
+      "name": "sanctions_stale_version_blocks",
+      "description": "Below minVersion \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "SANCTIONS_SCREENING": {
+          "cleared": true,
+          "version": 3,
+          "sourceHash": "OFAC-2026-06-04",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "sx"
+      }
+    },
+    {
+      "name": "sanctions_expired_blocks",
+      "description": "Past validUntil \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "SANCTIONS_SCREENING": {
+          "cleared": true,
+          "version": 9,
+          "sourceHash": "OFAC-2026-06-04",
+          "validUntil": 1740355199
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "sx"
+      }
+    },
+    {
+      "name": "sanctions_cleared_false_blocks",
+      "description": "Attestation says listed \u2192 block",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "SANCTIONS_SCREENING": {
+          "cleared": false,
+          "version": 9,
+          "sourceHash": "OFAC-2026-06-04",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "sx",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04",
+              "minVersion": 7
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "sx"
+      }
+    },
+    {
+      "name": "aml_valid_attestation_allows",
+      "description": "AML attestation valid \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "AML_TRIGGER": {
+          "cleared": true,
+          "version": 1,
+          "sourceHash": "AML-2026",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "aml",
+            "ruleType": "AML_TRIGGER",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "AML-2026"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "redemption_valid_attestation_allows",
+      "description": "Redemption attestation valid \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {
+        "REDEMPTION_ELIGIBILITY": {
+          "cleared": true,
+          "version": 1,
+          "sourceHash": "NAV-2026",
+          "validUntil": 1740358800
+        }
+      },
+      "module": {
+        "rules": [
+          {
+            "ruleId": "re",
+            "ruleType": "REDEMPTION_ELIGIBILITY",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "NAV-2026"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    },
+    {
+      "name": "priority_first_blocking_reported",
+      "description": "Lowest-priority blocking rule is reported",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 5000,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "p2_threshold",
+            "ruleType": "TRANSACTION_THRESHOLD",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 2,
+            "action": "REJECT",
+            "params": {
+              "thresholdAmount": 1000
+            }
+          },
+          {
+            "ruleId": "p1_sanctions",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "REJECT",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": false,
+        "blockedBy": "p1_sanctions"
+      }
+    },
+    {
+      "name": "non_blocking_action_does_not_block",
+      "description": "FLAG action on failing rule \u2192 allow",
+      "state": "ACTIVE",
+      "jurisdiction": "GE",
+      "amount": 100,
+      "timestamp": 1740355200,
+      "sender": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "receiver": {
+        "identityStatus": "VALID",
+        "jurisdiction": "GE",
+        "investorClass": "",
+        "acquisitionTime": 0
+      },
+      "attestations": {},
+      "module": {
+        "rules": [
+          {
+            "ruleId": "fl",
+            "ruleType": "SANCTIONS_SCREENING",
+            "scope": "*",
+            "trigger": "TRANSFER",
+            "priority": 1,
+            "action": "FLAG",
+            "params": {
+              "sourceHash": "OFAC-2026-06-04"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "allowed": true,
+        "blockedBy": null
+      }
+    }
+  ]
+}
