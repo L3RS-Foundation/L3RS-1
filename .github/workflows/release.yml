@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'sdk/v*'   # e.g. sdk/v1.0.0, sdk/v1.1.0
+      - 'sdk/v*'   # e.g. sdk/v1.0.1, sdk/v1.1.0
 
 permissions:
   contents: write   # to create GitHub Release
@@ -30,13 +30,9 @@ jobs:
       - name: Check all packages match tag version
         run: |
           VERSION="${GITHUB_REF#refs/tags/sdk/v}"
-          # TypeScript
           TS_VER=$(node -p "require('./packages/typescript/package.json').version")
-          # Python
           PY_VER=$(python3 -c "import tomllib; print(tomllib.load(open('packages/python/pyproject.toml','rb'))['project']['version'])")
-          # Rust
           RUST_VER=$(grep '^version' packages/rust/Cargo.toml | head -1 | cut -d'"' -f2)
-          # Go (uses git tag directly — no version file check needed)
 
           echo "Tag:        $VERSION"
           echo "TypeScript: $TS_VER"
@@ -55,32 +51,54 @@ jobs:
     needs: validate
     uses: ./.github/workflows/sdk.yml
 
-  # ─── Publish: npm (TypeScript) ───────────────────────────────────────────────
+  # ─── Detect which publishing credentials are configured ──────────────────────
+  # Secrets cannot be read in job-level `if:`, so we surface their presence as
+  # job outputs. Publish jobs below skip cleanly when the credential is absent,
+  # and turn on automatically once it is added — no further workflow change.
+  check-credentials:
+    name: Detect publish credentials
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      has_npm: ${{ steps.detect.outputs.has_npm }}
+      has_crates: ${{ steps.detect.outputs.has_crates }}
+    steps:
+      - id: detect
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then echo "has_npm=true" >> "$GITHUB_OUTPUT"; else echo "has_npm=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$CRATES_IO_TOKEN" ]; then echo "has_crates=true" >> "$GITHUB_OUTPUT"; else echo "has_crates=false" >> "$GITHUB_OUTPUT"; fi
+
+  # ─── Publish: npm (TypeScript) — only if NPM_TOKEN is configured ─────────────
   publish-npm:
     name: Publish to npm
-    needs: [validate, ci-gate]
+    needs: [validate, ci-gate, check-credentials]
+    if: needs.check-credentials.outputs.has_npm == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/typescript
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-
       - run: npm ci
       - run: npm run build
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ─── Publish: PyPI (Python) ─────────────────────────────────────────────────
+  # ─── Publish: PyPI (Python) — only if PUBLISH_PYPI variable is set ───────────
+  # PyPI uses trusted publishing (OIDC, no token), so it is gated on an explicit
+  # opt-in repository variable rather than a secret.
   publish-pypi:
     name: Publish to PyPI
     needs: [validate, ci-gate]
+    if: vars.PUBLISH_PYPI == 'true'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -90,57 +108,51 @@ jobs:
         working-directory: packages/python
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Build distributions
         run: |
           pip install build
           python -m build
-
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/python/dist/
 
-  # ─── Publish: crates.io (Rust) ──────────────────────────────────────────────
+  # ─── Publish: crates.io (Rust) — only if CRATES_IO_TOKEN is configured ───────
   publish-crates:
     name: Publish to crates.io
-    needs: [validate, ci-gate]
+    needs: [validate, ci-gate, check-credentials]
+    if: needs.check-credentials.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/rust
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages/rust
-
       - name: Publish
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
 
-  # ─── Publish: npm (Solidity contracts) ──────────────────────────────────────
+  # ─── Publish: npm (Solidity contracts) — only if NPM_TOKEN is configured ─────
   publish-contracts:
     name: Publish @l3rs/contracts to npm
-    needs: [validate, ci-gate]
+    needs: [validate, ci-gate, check-credentials]
+    if: needs.check-credentials.outputs.has_npm == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/solidity
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-
       - run: npm ci
       - run: npx hardhat compile
       - run: npm publish --access public
@@ -148,9 +160,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ─── GitHub Release ──────────────────────────────────────────────────────────
+  # Depends only on validation + CI. Registry publishing is independent and may
+  # be skipped; the release is still cut whenever the tagged commit is green.
   github-release:
     name: Create GitHub Release
-    needs: [validate, publish-npm, publish-pypi, publish-crates, publish-contracts]
+    needs: [validate, ci-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -158,7 +172,7 @@ jobs:
       - name: Build release archive
         run: |
           VERSION=${{ needs.validate.outputs.version }}
-          zip -r l3rs1-sdk-v${VERSION}.zip sdk/ \
+          zip -r "l3rs1-sdk-v${VERSION}.zip" packages/ test-vectors/ README.md CHANGELOG.md \
             -x "*.pyc" -x "*/__pycache__/*" -x "*/node_modules/*" \
             -x "*/target/*" -x "*/dist/*"
 
@@ -170,27 +184,29 @@ jobs:
           body: |
             ## L3RS-1 SDK v${{ needs.validate.outputs.version }}
 
-            Reference implementation of the L3RS-1 Layer-3 Regulated Asset Standard.
-            **Conformance class: CROSSCHAIN** — all invariants I₁–I₁₁ enforced.
+            Reference implementation of the L3RS-1 Layer-3 Regulated Asset Standard
+            (CROSSCHAIN conformance class) in six languages.
 
-            ### Packages
+            This release enforces fail-closed compliance across all SDK engines and
+            adds a shared cross-language conformance corpus verifying that the five
+            SDK engines produce identical compliance decisions. See CHANGELOG.md.
 
-            | Language | Package | Install |
-            |---|---|---|
-            | TypeScript | [`@l3rs/reference-impl`](https://npmjs.com/package/@l3rs/reference-impl) | `npm install @l3rs/reference-impl` |
-            | Python | [`l3rs1-sdk`](https://pypi.org/project/l3rs1-sdk/) | `pip install l3rs1-sdk` |
-            | Rust | [`l3rs1-sdk`](https://crates.io/crates/l3rs1-sdk) | `cargo add l3rs1-sdk` |
-            | Go | [`github.com/L3RS-Foundation/L3RS-1/sdk/go`](https://pkg.go.dev/github.com/L3RS-Foundation/L3RS-1/sdk/go) | `go get github.com/L3RS-Foundation/L3RS-1/sdk/go@v${{ needs.validate.outputs.version }}` |
-            | Java | [`foundation.l3rs1:l3rs1-sdk`](https://central.sonatype.com) | See `pom.xml` |
-            | Solidity | [`@l3rs/contracts`](https://npmjs.com/package/@l3rs/contracts) | `npm install @l3rs/contracts` |
+            ### Source
 
-            ### What's included
-            - Full CROSSCHAIN conformance class implementation
-            - Canonical test vectors per §11.5
-            - Zero external runtime dependencies (all packages)
-            - All 11 protocol invariants enforced
+            | Language | Path |
+            |---|---|
+            | TypeScript | `packages/typescript` |
+            | Python | `packages/python` |
+            | Go | `packages/go` |
+            | Rust | `packages/rust` |
+            | Java | `packages/java` |
+            | Solidity | `packages/solidity` |
 
-            See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+            Registry artifacts (npm, PyPI, crates.io) publish automatically once
+            publishing credentials are configured for this repository; until then,
+            build from source.
+
+            The L3RS-1 standard version is unchanged (L3RS-1 v1.0.0).
           files: l3rs1-sdk-v${{ needs.validate.outputs.version }}.zip
           draft: false
           prerelease: false
