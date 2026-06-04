@@ -1,6 +1,6 @@
 {
   "name": "@l3rs/reference-impl",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "L3RS-1 Layer-3 Regulated Asset Standard \u2014 Reference Implementation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
