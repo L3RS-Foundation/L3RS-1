@@ -19,15 +19,15 @@ type transition struct {
 }
 
 var transitionMatrix = []transition{
-	{types.AssetStateIssued,     "ACTIVATION",    types.AssetStateActive},
-	{types.AssetStateActive,     "BREACH",        types.AssetStateRestricted},
-	{types.AssetStateActive,     "FREEZE",        types.AssetStateFrozen},
-	{types.AssetStateRestricted, "CLEARED",       types.AssetStateActive},
-	{types.AssetStateFrozen,     "RELEASE",       types.AssetStateActive},
-	{types.AssetStateActive,     "REDEMPTION",    types.AssetStateRedeemed},
-	{types.AssetStateRedeemed,   "FINALIZATION",  types.AssetStateBurned},
-	{types.AssetStateActive,     "SUSPENSION",    types.AssetStateSuspended},
-	{types.AssetStateSuspended,  "REINSTATEMENT", types.AssetStateActive},
+	{types.AssetStateIssued, "ACTIVATION", types.AssetStateActive},
+	{types.AssetStateActive, "BREACH", types.AssetStateRestricted},
+	{types.AssetStateActive, "FREEZE", types.AssetStateFrozen},
+	{types.AssetStateRestricted, "CLEARED", types.AssetStateActive},
+	{types.AssetStateFrozen, "RELEASE", types.AssetStateActive},
+	{types.AssetStateActive, "REDEMPTION", types.AssetStateRedeemed},
+	{types.AssetStateRedeemed, "FINALIZATION", types.AssetStateBurned},
+	{types.AssetStateActive, "SUSPENSION", types.AssetStateSuspended},
+	{types.AssetStateSuspended, "REINSTATEMENT", types.AssetStateActive},
 }
 
 // StateTransitionResult holds the outcome of a state transition attempt.
@@ -52,15 +52,43 @@ func ApplyStateTransition(current types.AssetState, trigger string) StateTransit
 
 // ── §4 Compliance ────────────────────────────────────────────────────────────
 
-// EvaluateCompliance implements C: E → {0,1} per §4.3.
-func EvaluateCompliance(
-	module *types.ComplianceModule,
-	state types.AssetState,
-	sender, receiver string,
-	amount uint64,
-	timestamp int64,
-	jurisdiction string,
-) types.ComplianceDecision {
+// PartyAttributes holds the resolved, attested attributes of a transfer party.
+// The host supplies them (resolved from IdentityRecords and verified data); the
+// engine consumes them as deterministic, side-effect-free inputs per §4.6.
+type PartyAttributes struct {
+	IdentityStatus  types.IdentityStatus // §3.6 — must be VALID for identity-bearing rules
+	Jurisdiction    string               // holder jurisdiction code
+	InvestorClass   string               // e.g. ACCREDITED, QUALIFIED, RETAIL
+	AcquisitionTime int64                // unix seconds; basis for holding period
+}
+
+// OracleAttestation is the §10.15 contract for external data sources
+// (sanctions lists, AML scoring, reserve status). It MUST be hash-anchored,
+// versioned and time-bounded. Unknown, stale, or mismatched attestations
+// evaluate as BLOCKING ("Unknown oracle state SHALL evaluate as blocking").
+type OracleAttestation struct {
+	Cleared    bool   // determination result (true = passes)
+	Version    uint64 // monotonic source-dataset version
+	SourceHash string // hash anchor of the dataset actually used
+	ValidUntil int64  // unix seconds; stale at/after this time
+}
+
+// EvalContext carries everything the engine needs to evaluate every §4.4
+// category deterministically (§4.6, §4.13). Party-based categories read the
+// resolved attributes; inherently external categories read attestations.
+type EvalContext struct {
+	Amount       uint64
+	Timestamp    int64
+	Jurisdiction string // asset jurisdiction (rule scope matching)
+	Sender       PartyAttributes
+	Receiver     PartyAttributes
+	Attestations map[types.RuleType]OracleAttestation
+}
+
+// EvaluateCompliance implements C: E → {0,1} per §4.3 as the conjunction of all
+// in-scope rule predicates, evaluated in ascending priority order with the first
+// blocking rule terminating per §4.5. Enforces I₂ (§10.6): any FALSE blocks.
+func EvaluateCompliance(module *types.ComplianceModule, state types.AssetState, ctx EvalContext) types.ComplianceDecision {
 	if state != types.AssetStateActive {
 		return types.ComplianceDecision{Allowed: false}
 	}
@@ -70,36 +98,95 @@ func EvaluateCompliance(
 
 	for i := range rules {
 		rule := &rules[i]
-		if rule.Scope != "*" && rule.Scope != jurisdiction {
+		if rule.Scope != "*" && rule.Scope != ctx.Jurisdiction {
 			continue
 		}
-		passes := evalRule(rule, amount, timestamp)
-		if !passes && rule.Action.IsBlocking() {
+		if !evalRule(rule, ctx) && rule.Action.IsBlocking() {
 			return types.ComplianceDecision{Allowed: false, BlockedBy: rule, Action: rule.Action}
 		}
 	}
 	return types.ComplianceDecision{Allowed: true}
 }
 
-func evalRule(rule *types.ComplianceRule, amount uint64, timestamp int64) bool {
+// evalRule returns the rule predicate rᵢ: E → {TRUE, FALSE} (§4.6). Every branch
+// fails closed: missing inputs, unknown rule types, and unverifiable oracle state
+// all evaluate to FALSE (block).
+func evalRule(rule *types.ComplianceRule, ctx EvalContext) bool {
 	switch rule.RuleType {
-	case types.RuleTypeHoldingPeriod:
-		acq, ok1 := numParam(rule.Params, "acquisitionTime")
-		period, ok2 := numParam(rule.Params, "holdingPeriodSec")
-		if !ok1 || !ok2 {
+
+	case types.RuleTypeTransferEligibility:
+		return ctx.Sender.IdentityStatus == types.IdentityStatusValid &&
+			ctx.Receiver.IdentityStatus == types.IdentityStatusValid
+
+	case types.RuleTypeInvestorClassification:
+		allowed := listParam(rule.Params, "allowedClasses")
+		if len(allowed) == 0 || ctx.Receiver.InvestorClass == "" {
 			return false
 		}
-		return (timestamp - acq) >= period
+		return contains(allowed, ctx.Receiver.InvestorClass)
+
+	case types.RuleTypeHoldingPeriod:
+		period, ok := numParam(rule.Params, "holdingPeriodSec")
+		if !ok || ctx.Sender.AcquisitionTime == 0 {
+			return false
+		}
+		return (ctx.Timestamp - ctx.Sender.AcquisitionTime) >= period
+
+	case types.RuleTypeGeographicRestriction:
+		if ctx.Sender.Jurisdiction == "" || ctx.Receiver.Jurisdiction == "" {
+			return false
+		}
+		blocked := listParam(rule.Params, "blockedJurisdictions")
+		return !contains(blocked, ctx.Sender.Jurisdiction) &&
+			!contains(blocked, ctx.Receiver.Jurisdiction)
+
 	case types.RuleTypeTransactionThreshold:
 		t, ok := numParam(rule.Params, "thresholdAmount")
 		if !ok {
 			return false
 		}
-		return int64(amount) <= t
+		return int64(ctx.Amount) <= t
+
+	case types.RuleTypeMarketRestriction:
+		// Deterministic trading-window check when configured; else attested oracle.
+		open, ok1 := numParam(rule.Params, "windowOpen")
+		closeT, ok2 := numParam(rule.Params, "windowClose")
+		if ok1 && ok2 {
+			return ctx.Timestamp >= open && ctx.Timestamp < closeT
+		}
+		return attestationClears(rule, ctx)
+
+	case types.RuleTypeSanctionsScreening,
+		types.RuleTypeAMLTrigger,
+		types.RuleTypeRedemptionEligibility:
+		// Inherently external determinations — §10.15 attested oracle, fail-closed.
+		return attestationClears(rule, ctx)
+
 	default:
-		result, ok := rule.Params["externalResult"].(bool)
-		return ok && result
+		// Unknown / future rule type cannot be evaluated deterministically → block.
+		return false
 	}
+}
+
+// attestationClears applies the §10.15 oracle contract: the attestation must be
+// present, anchored to the operator-pinned source hash, at/above the pinned
+// minimum version, and within its freshness window. Anything else blocks.
+func attestationClears(rule *types.ComplianceRule, ctx EvalContext) bool {
+	att, ok := ctx.Attestations[rule.RuleType]
+	if !ok {
+		return false // unknown oracle state → block (§10.15)
+	}
+	pinned, _ := strParam(rule.Params, "sourceHash")
+	if pinned == "" || att.SourceHash != pinned {
+		return false // not anchored to the expected dataset → block
+	}
+	if minV, ok := numParam(rule.Params, "minVersion"); ok && int64(att.Version) < minV {
+		return false // stale dataset version → block
+	}
+	if ctx.Timestamp >= att.ValidUntil {
+		return false // stale attestation → block
+	}
+	return att.Cleared
 }
 
 func numParam(params map[string]any, key string) (int64, bool) {
@@ -116,6 +203,44 @@ func numParam(params map[string]any, key string) (int64, bool) {
 		return int64(n), true
 	}
 	return 0, false
+}
+
+func strParam(params map[string]any, key string) (string, bool) {
+	v, ok := params[key]
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+func listParam(params map[string]any, key string) []string {
+	v, ok := params[key]
+	if !ok {
+		return nil
+	}
+	switch s := v.(type) {
+	case []string:
+		return s
+	case []any:
+		out := make([]string, 0, len(s))
+		for _, e := range s {
+			if str, ok := e.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func contains(xs []string, x string) bool {
+	for _, e := range xs {
+		if e == x {
+			return true
+		}
+	}
+	return false
 }
 
 // ── §6.12 Fee Validation ─────────────────────────────────────────────────────
