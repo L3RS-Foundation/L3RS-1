@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "node --test tests/sdk.test.js",
+    "test:vectors": "npm run build && node tests/vectors.conformance.mjs",
     "typecheck": "tsc --noEmit",
     "docs": "typedoc"
   },

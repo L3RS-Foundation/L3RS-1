@@ -36,6 +36,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Test
         run: node --test tests/sdk.test.js
+      - name: Conformance vectors
+        run: npm run test:vectors
 
   python:
     name: Python (${{ matrix.python-version }})
