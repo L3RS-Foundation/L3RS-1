@@ -36,6 +36,21 @@ Amendments that weaken protocol invariants SHALL NOT be accepted.
 
 ---
 
+## Relationship to Section 11.8 of the Specification
+
+Section 11.8 of L3RS-1 requires four things of an amendment to the standard: technical committee approval, a public notice period, a supermajority governance vote, and publication of the amendment rationale. These requirements apply in every phase.
+
+During the Working Group phase:
+
+- **Technical review** is carried out by the Steward and Working Group reviewers and is recorded on the pull request.
+- **Public notice** is given by keeping the pull request open for public comment for not less than 14 days before it is accepted.
+- **Rationale** is published in the pull request and in the release note.
+- **No voting body yet exists.** An amendment that changes a requirement of the standard therefore cannot complete Section 11.8 in this phase. Until a governing body is seated, the Working Group publishes errata, clarifications and changes to the reference implementations, and does not publish a new minor or major version of the standard.
+
+Errata to a published version are recorded in `specification/ERRATA.md`. A published version is not altered.
+
+---
+
 ## Versioning
 
 L3RS-1 follows semantic versioning:

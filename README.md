@@ -14,6 +14,7 @@ A multi-language reference implementation of the [L3RS-1 specification](https://
 | `packages/rust` | Rust 1.77+ | High-perf nodes, WASM, cryptographic core |
 | `packages/java` | Java 21+ | Enterprise banking, Spring Boot, legacy infra |
 | `packages/solidity` | Solidity 0.8.24 | EVM on-chain enforcement (Profile A, §17.2) |
+| `packages/solidity-profile-f` | Solidity 0.8.26 | Profile F reference contracts (§17.7): `IdentityAttestation`, `ComplianceModule`, `PolicyRegistry`, `L3RS1Asset`. Pre-audit; see its README |
 
 ## Conformance Class
 
@@ -27,7 +28,7 @@ A multi-language reference implementation of the [L3RS-1 specification](https://
 - §7 Reserve Interface (attestation, redemption logic)
 - §8 Cross-Chain Meta-Standard (CID construction, downgrade resistance)
 - §9 Settlement Finality (atomicity, replay protection, TxID)
-- §10 Security Model (all 5 formal invariants enforced)
+- §10 Security Model (invariants I₁–I₅ enforced)
 - §13 Canonical Schema (deterministic serialization)
 
 ## Architecture
@@ -69,4 +70,5 @@ list, so its parity is verified at the invariant level by its own Hardhat suite
 
 ## License
 
-Open Standard – Royalty Free Implementation (per L3RS-1 §1 metadata)
+- **Specification.** L3RS-1 is an open standard, royalty-free to implement (L3RS-1 §1 metadata). The published text is deposited on Zenodo, [doi:10.5281/zenodo.20226281](https://doi.org/10.5281/zenodo.20226281), under the license stated on that record. Known defects in the published text are listed in [`specification/ERRATA.md`](specification/ERRATA.md).
+- **Code.** Everything else in this repository, including every package under `packages/`, is licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).
