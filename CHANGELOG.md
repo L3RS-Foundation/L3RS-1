@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) �
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- `packages/solidity-profile-f` — Profile F reference contracts (§17.7): `IdentityAttestation`, `ComplianceModule`, `PolicyRegistry` and `L3RS1Asset`, with the `SignatureVerification`, `SelectiveDisclosure` and `Sha3` libraries, 287 tests, and the design record. Pre-audit reference implementation; its README lists the known limitations. Built with Foundry; dependencies are pinned git submodules. `packages/solidity` (Profile A) is unchanged.
+- `specification/ERRATA.md` — three errata to the published v1.0.0 text. No requirement changes.
+- CI job for the Profile F package (`forge build`, `forge test`).
+
+### Changed
+
+- README: license section names the license of the code and points to the specification's record; the §10 line names invariants I₁–I₅.
+- GOVERNANCE: states how Section 11.8 of the specification applies during the Working Group phase.
+
+---
+
 ## [1.0.1] — 2026-06-04
 
 ### Fixed — compliance enforcement (correctness)

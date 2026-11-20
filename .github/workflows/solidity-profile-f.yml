@@ -1,0 +1,44 @@
+name: Solidity Profile F
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/solidity-profile-f/**'
+      - '.gitmodules'
+      - '.github/workflows/solidity-profile-f.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/solidity-profile-f/**'
+      - '.gitmodules'
+      - '.github/workflows/solidity-profile-f.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: solidity-profile-f-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  forge:
+    name: Foundry build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/solidity-profile-f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Test
+        run: forge test

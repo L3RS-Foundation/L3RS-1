@@ -1,0 +1,18 @@
+cache/
+out/
+broadcast/
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+coverage/
+lcov.info
+
+# Self-audit analyzer outputs — regenerated per run, not versioned.
+# See DESIGN.md §13 for the findings summaries distilled from these reports.
+report.md
+semgrep-report.txt
+semgrep-report.json
+mythril-*.txt
