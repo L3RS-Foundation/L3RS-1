@@ -227,6 +227,7 @@ abstract contract BaseTest is Test {
             tier: tier,
             expiry: expiry,
             nonce: _vaNonceCursor,
+            epoch: identity.attestationEpoch(holder, jurisdiction_),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
@@ -238,6 +239,7 @@ abstract contract BaseTest is Test {
             a.tier,
             a.expiry,
             a.nonce,
+            a.epoch,
             a.attributeCommitmentsRoot,
             keccak256(a.zkProof)
         ));

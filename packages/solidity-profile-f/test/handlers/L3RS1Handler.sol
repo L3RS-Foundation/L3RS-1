@@ -195,12 +195,13 @@ contract L3RS1Handler is Test {
             tier: tier,
             expiry: expiry,
             nonce: _vaNonceCursor,
+            epoch: identity.attestationEpoch(holder, j),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
         bytes32 structHash = keccak256(abi.encode(
             identity.ATTESTATION_TYPEHASH(),
-            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce,
+            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce, a.epoch,
             a.attributeCommitmentsRoot,
             keccak256(a.zkProof)
         ));

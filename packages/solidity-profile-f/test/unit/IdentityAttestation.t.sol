@@ -93,7 +93,7 @@ contract IdentityAttestationTest is Test {
     function _attestationStructHash(IdentityAttestation.Attestation memory a) internal view returns (bytes32) {
         return keccak256(abi.encode(
             identity.ATTESTATION_TYPEHASH(),
-            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce,
+            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce, a.epoch,
             a.attributeCommitmentsRoot,
             keccak256(a.zkProof)
         ));
@@ -111,6 +111,7 @@ contract IdentityAttestationTest is Test {
             tier: tier,
             expiry: expiry,
             nonce: _vaNonceCursor,
+            epoch: identity.attestationEpoch(who, j),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
@@ -548,6 +549,7 @@ contract IdentityAttestationTest is Test {
             tier: 2,
             expiry: block.timestamp + 365 days,
             nonce: 1001,
+            epoch: identity.attestationEpoch(holder, JURISDICTION_GB),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: hex"deadbeef" // arbitrary bytes; mock accepts
         });
@@ -578,6 +580,7 @@ contract IdentityAttestationTest is Test {
             tier: 2,
             expiry: block.timestamp + 365 days,
             nonce: 1002,
+            epoch: identity.attestationEpoch(holder, JURISDICTION_GB),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: hex"00"
         });
@@ -718,6 +721,7 @@ contract IdentityAttestationTest is Test {
             tier: 2,
             expiry: block.timestamp + 365 days,
             nonce: 42,
+            epoch: identity.attestationEpoch(holder, JURISDICTION_GB),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
@@ -732,6 +736,7 @@ contract IdentityAttestationTest is Test {
             tier: 2,
             expiry: block.timestamp + 365 days,
             nonce: 42,
+            epoch: identity.attestationEpoch(outsider, JURISDICTION_GB),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
