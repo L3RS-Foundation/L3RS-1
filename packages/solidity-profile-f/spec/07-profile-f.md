@@ -259,6 +259,54 @@ If ID ≥ 1, settlement MUST NOT proceed unless Status(IR) = VALID.
 
 **Implementation in Phase One:** IdentityAttestation.sol stores HID (not PII) and exposes a `getStatus(address)` function returning the four-valued status. Integration with external KYC providers happens through the VA field, whose public keys are registered in the contract.
 
+### VA signing procedure (post-T3RRA-REVOKE-REPLAY-01)
+
+**Source:** L3RS-1 §3.3 and §3.5 as refined by GHSA-37jh-xr77-cjfr. See the security advisory on this repository for the full root-cause analysis and remediation record.
+
+The VA signing procedure is additive relative to L3RS-1 §3.3's description of the Identity Record. Prior to producing an EIP-712 signature over an Attestation struct, the VA MUST read the current attestation epoch for the `(holder, jurisdiction)` pair from the on-chain `IdentityAttestation` contract and include the returned value in the signed message. Grants that do not carry the current on-chain epoch revert with `StaleAttestationEpoch`.
+
+**Attestation struct shape:**
+
+```solidity
+struct Attestation {
+    address holder;
+    bytes32 hid;
+    bytes2  jurisdiction;
+    uint8   tier;
+    uint256 expiry;
+    uint256 nonce;
+    uint256 epoch;                 // read from attestationEpoch(holder, jurisdiction) before signing
+    bytes32 attributeCommitmentsRoot;
+    bytes   zkProof;
+}
+```
+
+**EIP-712 typehash (verbatim):**
+
+```
+Attestation(address holder,bytes32 hid,bytes2 jurisdiction,uint8 tier,uint256 expiry,uint256 nonce,uint256 epoch,bytes32 attributeCommitmentsRoot,bytes zkProof)
+```
+
+**Procedure:**
+
+1. **Read the current epoch.** Call `IdentityAttestation.attestationEpoch(holder, jurisdiction)` via `eth_call` or an equivalent read-only RPC. The returned value is a `uint256`.
+2. **Construct the Attestation struct** with the returned value placed in the `epoch` field and every other field populated per the standard VA attestation workflow (tier, expiry, fresh per-VA nonce, HID, optional attribute commitment root, optional ZK proof).
+3. **Produce the EIP-712 signature** over the struct using the contract's VA domain separator (`DOMAIN_SEPARATOR_VA`) and the typehash above.
+4. **Submit** the attestation to `grantAttestation(a, vaSignature)` within an operational window short enough that no concurrent grant or revocation has bumped the on-chain epoch. In practice, submission within the same block as the read is always safe; submission within the same minute is safe under expected VA throughput.
+
+**Error surface on the grant:**
+
+- `StaleAttestationEpoch` — the signed epoch does not match the current on-chain value. Re-read `attestationEpoch(holder, jurisdiction)`, construct a fresh Attestation with the updated epoch, re-sign, and resubmit. This is the expected recovery path under natural concurrency.
+- `NonceReused` — the per-VA nonce was already consumed. The VA must pick a fresh nonce; nonces are a per-VA used-set, not a sequence counter.
+- `UnknownVA` — the recovered signer is not a registered VA. The VA may have been deregistered under governance quorum; coordination with governance is required before resuming attestation issuance.
+
+**Concurrency handling.** If two VAs sign attestations at the same instant for the same `(holder, jurisdiction)` pair, both read epoch `N`, both sign with `N`, and only the first submission succeeds. The second reverts with `StaleAttestationEpoch` and must re-sign with `N+1`. For expected VA throughput (single-digit grants per holder per year) this is not a material operational concern. VAs operating under higher throughput requirements should coordinate signing through a lock-step queue on the `(holder, jurisdiction)` key off-chain to avoid wasted signatures.
+
+**Reading the epoch is mandatory, not optional.** A VA that caches an old epoch value produces signatures that revert on submission. The `eth_call` to `attestationEpoch` is cheap (no storage write, no quorum, no signature required) and should be performed immediately before every signature.
+
+**Rationale.** The epoch field defeats the T3RRA-REVOKE-REPLAY-01 class of attack: a VA-signed attestation held back from before a governance revocation or VA downgrade carries a now-stale epoch value and reverts on any later submission. The per-VA nonce check prevents identical-bytes replay; the epoch check prevents sibling-attestation replay. Both are necessary; the two checks are complementary.
+
+
 ---
 
 ## Canonical serialization
