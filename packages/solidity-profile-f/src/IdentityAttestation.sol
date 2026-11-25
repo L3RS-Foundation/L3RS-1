@@ -44,6 +44,18 @@ contract IdentityAttestation {
     }
 
     /// @notice Attestation payload signed by a Verification Authority.
+    /// @dev The `epoch` field binds the attestation to a specific state of the
+    ///      on-chain identity record for (holder, jurisdiction). It is the
+    ///      value of `_attestationEpoch[holder][jurisdiction]` AT SIGNING TIME.
+    ///      On grant, the contract requires `a.epoch == _attestationEpoch[...]`
+    ///      and then bumps the counter. Revocation also bumps. Any attestation
+    ///      signed against an epoch that has since been superseded by a grant
+    ///      or revocation is stale and reverts with `StaleAttestationEpoch`.
+    ///
+    ///      Added during the T3RRA-REVOKE-REPLAY-01 remediation (DESIGN.md
+    ///      §16). A VA signing path reads `attestationEpoch(holder, jur)`
+    ///      before producing the signature. See DESIGN.md §16 for the attack
+    ///      the field defeats and for the operational constraints on the VA.
     struct Attestation {
         address holder;
         bytes32 hid;
@@ -51,6 +63,7 @@ contract IdentityAttestation {
         uint8 tier;
         uint256 expiry;
         uint256 nonce;
+        uint256 epoch;
         bytes32 attributeCommitmentsRoot;
         bytes zkProof;
     }
@@ -82,6 +95,14 @@ contract IdentityAttestation {
     mapping(address => mapping(bytes2 => bool)) internal _hasRecord;
     mapping(address => bytes2[]) internal _holderJurisdictions;
 
+    /// @notice Per-(holder, jurisdiction) attestation epoch. Bumped on every
+    ///         successful `grantAttestation` and on every `revokeAttestation`.
+    ///         An Attestation struct must carry a matching `epoch` value, read
+    ///         by the signing VA before signing. Stale attestations (signed
+    ///         against a prior epoch) revert with `StaleAttestationEpoch`.
+    ///         Added for T3RRA-REVOKE-REPLAY-01 — see DESIGN.md §16.
+    mapping(address => mapping(bytes2 => uint256)) internal _attestationEpoch;
+
     /// @notice Monotonically increasing counter of revocations. Distinct from
     ///         `governanceNonce` (which counts governance actions of every kind).
     ///         See `AttestationRevoked` event.
@@ -102,8 +123,13 @@ contract IdentityAttestation {
     bytes32 public constant REVOKE_ATTESTATION_TYPEHASH = keccak256(
         "RevokeAttestation(address registry,address holder,bytes2 jurisdiction,uint256 nonce,uint256 deadline)"
     );
+    /// @dev Typehash changed in the T3RRA-REVOKE-REPLAY-01 remediation to add
+    ///      the `epoch` field. Every VA signature issued against the pre-fix
+    ///      typehash is permanently invalid, which is the intended behavior:
+    ///      the fix is only meaningful if the signing surface rejects
+    ///      pre-fix signatures. See DESIGN.md §16.
     bytes32 public constant ATTESTATION_TYPEHASH = keccak256(
-        "Attestation(address holder,bytes32 hid,bytes2 jurisdiction,uint8 tier,uint256 expiry,uint256 nonce,bytes32 attributeCommitmentsRoot,bytes zkProof)"
+        "Attestation(address holder,bytes32 hid,bytes2 jurisdiction,uint8 tier,uint256 expiry,uint256 nonce,uint256 epoch,bytes32 attributeCommitmentsRoot,bytes zkProof)"
     );
     bytes32 public constant SET_ZK_VERIFIER_TYPEHASH = keccak256(
         "SetZKVerifier(address registry,address newVerifier,uint256 nonce,uint256 deadline)"
@@ -169,6 +195,13 @@ contract IdentityAttestation {
     error InsufficientSignatures();
     error DuplicateAuthority();
     error InvalidZKProof();
+
+    /// @notice Attestation carries an epoch that does not match the current
+    ///         `_attestationEpoch[holder][jurisdiction]`. The attestation was
+    ///         either signed before a subsequent grant or revocation bumped
+    ///         the epoch (stale) or signed against a future epoch (invalid).
+    ///         See T3RRA-REVOKE-REPLAY-01 remediation in DESIGN.md §16.
+    error StaleAttestationEpoch();
 
     // ----- construction -------------------------------------------------------
 
@@ -297,6 +330,11 @@ contract IdentityAttestation {
         Record storage r = _records[holder][jurisdiction_];
         r.revoked = true;
         revocationIndex += 1;
+        // Bump the per-(holder, jurisdiction) attestation epoch so any
+        // pre-revocation VA-signed attestation held back by the holder is now
+        // stale and reverts on submission with `StaleAttestationEpoch`. See
+        // DESIGN.md §16 for the T3RRA-REVOKE-REPLAY-01 remediation.
+        _attestationEpoch[holder][jurisdiction_] += 1;
         emit AttestationRevoked(
             r.hid,
             r.verificationAuthority,
@@ -314,9 +352,20 @@ contract IdentityAttestation {
     ///         under DOMAIN_SEPARATOR_VA. HID is opaque — VA computes it off-chain
     ///         per L3RS-1 §3.4 as H(PII ‖ salt ‖ domain). PII never touches the
     ///         contract. See DESIGN.md §5a and §8.2.
+    /// @dev The VA MUST read `attestationEpoch(a.holder, a.jurisdiction)` from
+    ///      this contract before signing and include that value in the signed
+    ///      struct. The grant reverts with `StaleAttestationEpoch` if the
+    ///      attestation's epoch does not match the current on-chain value.
+    ///      On successful grant, the epoch bumps by one. This defeats the
+    ///      T3RRA-REVOKE-REPLAY-01 class of attack — a VA-signed attestation
+    ///      withheld from before a revocation or downgrade is now stale on
+    ///      submission. See DESIGN.md §16.
     function grantAttestation(Attestation calldata a, bytes calldata vaSignature) external {
         if (a.holder == address(0)) revert ZeroAddress();
         if (a.tier < 1 || a.tier > 3) revert InvalidTier();
+        if (a.epoch != _attestationEpoch[a.holder][a.jurisdiction]) {
+            revert StaleAttestationEpoch();
+        }
 
         bytes32 structHash = keccak256(abi.encode(
             ATTESTATION_TYPEHASH,
@@ -326,6 +375,7 @@ contract IdentityAttestation {
             a.tier,
             a.expiry,
             a.nonce,
+            a.epoch,
             a.attributeCommitmentsRoot,
             keccak256(a.zkProof)
         ));
@@ -334,6 +384,14 @@ contract IdentityAttestation {
         if (!_isVA[va]) revert UnknownVA();
         if (_usedVANonce[va][a.nonce]) revert NonceReused();
         _usedVANonce[va][a.nonce] = true;
+
+        // Bump the per-(holder, jurisdiction) epoch so any other attestation
+        // signed against this same epoch — whether a sibling backup from the
+        // same signing session or a different-VA signature with the same
+        // epoch value — becomes stale on the next submission. Combined with
+        // the revoke-time bump, this gives strict one-attestation-per-epoch
+        // semantics. See DESIGN.md §16.
+        _attestationEpoch[a.holder][a.jurisdiction] += 1;
 
         // ZKP verification per L3RS-1 §3.8. When a proof is attached, delegate to
         // the pluggable verifier. Empty PROOF means no ZK attestation; accepted.
@@ -438,6 +496,15 @@ contract IdentityAttestation {
 
     function hasVANonceBeenUsed(address va, uint256 nonce) external view returns (bool) {
         return _usedVANonce[va][nonce];
+    }
+
+    /// @notice Current attestation epoch for the (holder, jurisdiction) pair.
+    ///         A VA signing a new attestation MUST read this value and include
+    ///         it in the signed `Attestation.epoch` field. The on-chain grant
+    ///         then checks `a.epoch == this` and bumps the counter. See the
+    ///         T3RRA-REVOKE-REPLAY-01 remediation in DESIGN.md §16.
+    function attestationEpoch(address holder, bytes2 jurisdiction_) external view returns (uint256) {
+        return _attestationEpoch[holder][jurisdiction_];
     }
 
     /// @notice Return the four-valued status for a holder in a specific jurisdiction.

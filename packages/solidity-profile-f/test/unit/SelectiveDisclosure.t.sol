@@ -125,12 +125,13 @@ contract SelectiveDisclosureTest is Test {
             tier: tier,
             expiry: expiry,
             nonce: _vaNonce,
+            epoch: identity.attestationEpoch(who, j),
             attributeCommitmentsRoot: commitmentRoot,
             zkProof: ""
         });
         bytes32 structHash = keccak256(abi.encode(
             identity.ATTESTATION_TYPEHASH(),
-            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce,
+            a.holder, a.hid, a.jurisdiction, a.tier, a.expiry, a.nonce, a.epoch,
             a.attributeCommitmentsRoot,
             keccak256(a.zkProof)
         ));

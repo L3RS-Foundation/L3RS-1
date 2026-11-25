@@ -936,6 +936,7 @@ contract CREMandateScenario is Test {
             tier: tier,
             expiry: expiry,
             nonce: _vaNonceCursor,
+            epoch: identity.attestationEpoch(holder, jur),
             attributeCommitmentsRoot: bytes32(0),
             zkProof: ""
         });
@@ -948,6 +949,7 @@ contract CREMandateScenario is Test {
                 a.tier,
                 a.expiry,
                 a.nonce,
+                a.epoch,
                 a.attributeCommitmentsRoot,
                 keccak256(a.zkProof)
             )
